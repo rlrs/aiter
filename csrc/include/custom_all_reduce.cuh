@@ -154,9 +154,8 @@ DINLINE O downcast(V val)
 }
 
 // This function is meant to be used as the first synchronization in the all
-// reduce kernel. Thus, it doesn't need to make any visibility guarantees for
-// prior memory accesses. Note: volatile writes will not be reordered against
-// other volatile writes.
+// reduce kernel. The release/acquire flag exchange makes local producer writes
+// visible before peer ranks start reading the input through IPC.
 template <int ngpus>
 DINLINE void start_sync(const RankSignals& sg,
 #ifndef USE_ROCM
@@ -173,12 +172,12 @@ DINLINE void start_sync(const RankSignals& sg,
         // Latency = 1 p2p write
         __scoped_atomic_store_n(&sg.signals[threadIdx.x]->start[blockIdx.x][rank],
                                 flag,
-                                __ATOMIC_RELAXED,
+                                __ATOMIC_RELEASE,
                                 __MEMORY_SCOPE_SYSTEM);
         // wait until we got true from all ranks
         while(__scoped_atomic_load_n(&self_sg->start[blockIdx.x][threadIdx.x],
-                                     __ATOMIC_RELAXED,
-                                     __MEMORY_SCOPE_DEVICE) < flag)
+                                     __ATOMIC_ACQUIRE,
+                                     __MEMORY_SCOPE_SYSTEM) < flag)
             ;
     }
     __syncthreads();
