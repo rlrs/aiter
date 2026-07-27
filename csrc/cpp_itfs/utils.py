@@ -16,6 +16,7 @@ import logging
 import time
 import inspect
 import json
+import stat
 
 
 def get_git_commit_id_short():
@@ -167,6 +168,23 @@ def validate_and_update_archs():
     return archs
 
 
+def copytree_to_build(src: str, dst: str) -> None:
+    """Copy a source tree without making the build staging tree read-only."""
+    shutil.copytree(src, dst, dirs_exist_ok=True)
+
+    # copytree preserves directory permissions. Installed AITER packages may be
+    # read-only, but several include trees are merged into the same staging
+    # directory before compilation. Keep that private staging copy writable.
+    for root, dirs, files in os.walk(dst):
+        for path in [root, *(os.path.join(root, name) for name in dirs)]:
+            mode = stat.S_IMODE(os.stat(path).st_mode)
+            os.chmod(path, mode | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+        for name in files:
+            path = os.path.join(root, name)
+            mode = stat.S_IMODE(os.stat(path).st_mode)
+            os.chmod(path, mode | stat.S_IRUSR | stat.S_IWUSR)
+
+
 def compile_lib(src_file, folder, includes=None, sources=None, cxxflags=None):
     sub_build_dir = os.path.join(BUILD_DIR, folder)
     include_dir = f"{sub_build_dir}/include"
@@ -186,12 +204,12 @@ def compile_lib(src_file, folder, includes=None, sources=None, cxxflags=None):
 
         for include in includes + [f"{CK_DIR}/include"]:
             if os.path.isdir(include):
-                shutil.copytree(include, include_dir, dirs_exist_ok=True)
+                copytree_to_build(include, include_dir)
             else:
                 shutil.copy(include, include_dir)
         for source in sources:
             if os.path.isdir(source):
-                shutil.copytree(source, sub_build_dir, dirs_exist_ok=True)
+                copytree_to_build(source, sub_build_dir)
             else:
                 shutil.copy(source, sub_build_dir)
         with open(f"{sub_build_dir}/{folder}.cpp", "w") as f:
